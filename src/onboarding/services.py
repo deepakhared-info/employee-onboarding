@@ -98,6 +98,7 @@ class EmployeeService:
         )
         items = [
             EmployeeListItem(
+                id=e.id,
                 first_name=e.first_name,
                 last_name=e.last_name,
                 email=e.email,

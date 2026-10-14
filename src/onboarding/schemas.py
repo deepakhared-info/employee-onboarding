@@ -74,6 +74,7 @@ class SkillProficiency(BaseModel):
 
 
 class EmployeeListItem(BaseModel):
+    id: int
     first_name: str
     last_name: str
     email: str

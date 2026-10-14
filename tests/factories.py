@@ -31,6 +31,7 @@ def make_task(**overrides):
 def make_list_response(n_items=1, **overrides):
     items = [
         EmployeeListItem(
+            id=i+1,
             first_name="John",
             last_name="Doe",
             email=f"john{i}@example.com",
