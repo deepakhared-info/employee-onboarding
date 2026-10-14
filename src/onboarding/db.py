@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Sequence
 
 from pydantic import BaseModel
 from sqlalchemy import delete, exists, func, select
@@ -14,6 +14,18 @@ class EmployeeDBManager(BaseDBManager[Employee, BaseModel, BaseModel]):
     async def get_by_email(self, db: AsyncSession, *, email: str) -> Optional[Employee]:
         result = await db.execute(select(Employee).where(Employee.email == email))
         return result.scalars().first()
+
+    async def insert_new(self, db: AsyncSession, *, objs_in: Sequence[BaseModel]) -> list[int]:
+        if not objs_in:
+            return []
+        rows = sorted((o.model_dump() for o in objs_in), key=lambda r: r["email"])
+        result = await db.execute(
+            pg_insert(Employee)
+            .values(rows)
+            .on_conflict_do_nothing(index_elements=["email"])
+            .returning(Employee.id)
+        )
+        return list(result.scalars().all())
 
     async def get_for_update(self, db: AsyncSession, *, id: int) -> Optional[Employee]:
         """Fetch an employee holding a row lock until the transaction ends."""

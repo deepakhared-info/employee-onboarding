@@ -64,21 +64,27 @@ class EmployeeService:
             seen.add(employee.email)
             valid.append(employee)
 
+        created = 0
         if valid:
             try:
-                employees = await self.manager.bulk_create(db, objs_in=valid, commit=False)
-                tasks = await provisioning_task_manager.create_for_employees(
-                    db, employee_ids=[e.id for e in employees]
-                )
-                task_ids = [t.id for t in tasks]
+                employee_ids = await self.manager.insert_new(db, objs_in=valid)
+                created = len(employee_ids)
+                skipped += len(valid) - created
+                task_ids = []
+                if employee_ids:
+                    tasks = await provisioning_task_manager.create_for_employees(
+                        db, employee_ids=employee_ids
+                    )
+                    task_ids = [t.id for t in tasks]
                 await db.commit()
             except Exception:
                 await db.rollback()
                 raise
-            self.dispatcher.dispatch(task_ids)
+            if task_ids:
+                self.dispatcher.dispatch(task_ids)
 
         return EmployeeImportResult(
-            created=len(valid), skipped=skipped, errors=errors, provisioning_queued=len(valid)
+            created=created, skipped=skipped, errors=errors, provisioning_queued=created
         )
 
     async def list_employees(

@@ -18,7 +18,7 @@ def db():
 def manager():
     m = MagicMock()
     m.get_by_email = AsyncMock(return_value=None)
-    m.bulk_create = AsyncMock(side_effect=lambda db, objs_in, commit: [make_employee(id=i + 1) for i, _ in enumerate(objs_in)])
+    m.insert_new = AsyncMock(side_effect=lambda db, objs_in: [i + 1 for i, _ in enumerate(objs_in)])
     m.search = AsyncMock(return_value=([], 0))
     return m
 
@@ -50,7 +50,7 @@ class TestImportFromCsv:
         result = await service.import_from_csv(db, content)
 
         assert (result.created, result.skipped, result.errors, result.provisioning_queued) == (2, 0, [], 2)
-        assert [e.email for e in manager.bulk_create.await_args.kwargs["objs_in"]] == ["a@x.com", "b@x.com"]
+        assert [e.email for e in manager.insert_new.await_args.kwargs["objs_in"]] == ["a@x.com", "b@x.com"]
         db.commit.assert_awaited_once()
         dispatcher.dispatch.assert_called_once_with([100, 101])
 
@@ -74,7 +74,26 @@ class TestImportFromCsv:
         result = await service.import_from_csv(db, make_csv(["A,One,bad,2026-01-01"]))
 
         assert result.created == 0
-        manager.bulk_create.assert_not_awaited()
+        manager.insert_new.assert_not_awaited()
+        dispatcher.dispatch.assert_not_called()
+
+    async def test_rows_inserted_concurrently_are_skipped(self, service, db, manager, task_manager, dispatcher):
+        manager.insert_new.side_effect = lambda db, objs_in: [1]  # other request won the 2nd row
+        content = make_csv(["A,One,a@x.com,2026-01-01", "B,Two,b@x.com,2026-01-02"])
+
+        result = await service.import_from_csv(db, content)
+
+        assert (result.created, result.skipped, result.provisioning_queued) == (1, 1, 1)
+        task_manager.create_for_employees.assert_awaited_once_with(db, employee_ids=[1])
+        dispatcher.dispatch.assert_called_once_with([100])
+
+    async def test_all_rows_inserted_concurrently_creates_nothing(self, service, db, manager, task_manager, dispatcher):
+        manager.insert_new.side_effect = lambda db, objs_in: []
+
+        result = await service.import_from_csv(db, make_csv(["A,One,a@x.com,2026-01-01"]))
+
+        assert (result.created, result.skipped) == (0, 1)
+        task_manager.create_for_employees.assert_not_awaited()
         dispatcher.dispatch.assert_not_called()
 
     async def test_missing_columns(self, service, db):
@@ -82,7 +101,7 @@ class TestImportFromCsv:
             await service.import_from_csv(db, b"email\na@x.com")
 
     async def test_db_failure_rolls_back_and_does_not_dispatch(self, service, db, manager, dispatcher):
-        manager.bulk_create.side_effect = RuntimeError("db down")
+        manager.insert_new.side_effect = RuntimeError("db down")
 
         with pytest.raises(RuntimeError):
             await service.import_from_csv(db, make_csv())
