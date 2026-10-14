@@ -72,17 +72,23 @@ class EmployeeDBManager(BaseDBManager[Employee, BaseModel, BaseModel]):
 
 class SkillDBManager(BaseDBManager[Skill, BaseModel, BaseModel]):
     async def get_or_create_many(self, db: AsyncSession, *, names: list[str]) -> dict[str, Skill]:
-        """Return {name: Skill}, creating missing skills. Safe under concurrent calls:
-        INSERT .. ON CONFLICT DO NOTHING lets the unique index arbitrate, then we select.
-        Names are inserted in sorted order so concurrent requests can't deadlock."""
+        """Return {name.lower(): Skill}, creating missing skills. Names match case-insensitively
+        (an existing "Python" is reused for "python"). Safe under concurrent calls:
+        INSERT .. ON CONFLICT DO NOTHING lets the unique lower(name) index arbitrate, then we
+        select. Names are inserted in sorted order so concurrent requests can't deadlock."""
         if not names:
             return {}
-        ordered = sorted(set(names))
+        by_key: dict[str, str] = {}
+        for n in names:
+            by_key.setdefault(n.lower(), n)
+        keys = sorted(by_key)
         await db.execute(
-            pg_insert(Skill).values([{"name": n} for n in ordered]).on_conflict_do_nothing(index_elements=["name"])
+            pg_insert(Skill)
+            .values([{"name": by_key[k]} for k in keys])
+            .on_conflict_do_nothing(index_elements=[func.lower(Skill.name)])
         )
-        result = await db.execute(select(Skill).where(Skill.name.in_(ordered)))
-        return {skill.name: skill for skill in result.scalars()}
+        result = await db.execute(select(Skill).where(func.lower(Skill.name).in_(keys)))
+        return {skill.name.lower(): skill for skill in result.scalars()}
 
 
 class EmployeeSkillDBManager(BaseDBManager[EmployeeSkill, BaseModel, BaseModel]):

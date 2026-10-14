@@ -71,6 +71,7 @@ class TestAssignSkills:
         "payload",
         [
             skills_payload(("python", "expert"), ("python", "beginner")),  # duplicate names
+            skills_payload(("Python", "expert"), ("python", "beginner")),  # duplicate, different case
             skills_payload(("python", "godlike")),  # bad proficiency
             skills_payload(("  ", "expert")),  # blank name
         ],

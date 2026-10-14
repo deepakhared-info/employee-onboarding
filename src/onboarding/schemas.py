@@ -55,7 +55,7 @@ class EmployeeSkillsSet(BaseModel):
     @field_validator("skills")
     @classmethod
     def unique_names(cls, v: list[EmployeeSkillAssign]) -> list[EmployeeSkillAssign]:
-        names = [a.name for a in v]
+        names = [a.name.lower() for a in v]
         if len(names) != len(set(names)):
             raise ValueError("duplicate skill names in request")
         return v

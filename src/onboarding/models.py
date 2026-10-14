@@ -1,7 +1,7 @@
 import enum
 from datetime import date
 
-from sqlalchemy import Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Enum, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
@@ -34,7 +34,10 @@ class Employee(Base):
 
 class Skill(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+
+    # Names are unique case-insensitively; the first-seen casing is what we display.
+    __table_args__ = (Index("ix_skill_name_lower", func.lower(name), unique=True),)
 
 
 class EmployeeSkill(Base):

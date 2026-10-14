@@ -134,7 +134,7 @@ class SkillService:
             await employee_skill_manager.delete_for_employee(db, employee_id=employee_id)
             db.add_all(
                 EmployeeSkill(
-                    employee_id=employee_id, skill_id=skills[a.name].id, proficiency=a.proficiency
+                    employee_id=employee_id, skill_id=skills[a.name.lower()].id, proficiency=a.proficiency
                 )
                 for a in data.skills
             )
