@@ -3,9 +3,7 @@ import io
 from abc import ABC, abstractmethod
 from typing import Iterable, Iterator
 
-
-class InvalidFileError(ValueError):
-    pass
+from src.core.errors import InvalidFileError
 
 
 class IOReader(ABC):

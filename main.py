@@ -9,4 +9,4 @@ def selector_loop_factory():
 
 
 if __name__ == "__main__":
-    run(app, port=8080, loop="main:selector_loop_factory")
+    run("main:app", port=8080, loop="main:selector_loop_factory", reload=True)
