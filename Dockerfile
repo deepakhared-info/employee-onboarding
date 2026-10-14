@@ -27,7 +27,7 @@ COPY --from=builder /opt/venv /opt/venv
 COPY . .
 
 EXPOSE 8080
-CMD ["uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --reload --host 0.0.0.0 --port 8080"]
 
 # ---- runtime: minimal production image (default target) ----
 FROM python:${PYTHON_VERSION}-slim AS runtime
@@ -41,7 +41,10 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=appuser:appuser main.py ./
 COPY --chown=appuser:appuser src ./src
+COPY --chown=appuser:appuser alembic.ini ./
+COPY --chown=appuser:appuser migrations ./migrations
 
 USER appuser
 EXPOSE 8080
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Apply pending migrations, then start the server (exec so uvicorn receives signals).
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --host 0.0.0.0 --port 8080"]
