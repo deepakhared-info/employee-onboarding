@@ -26,6 +26,7 @@ class EmployeeImportResult(BaseModel):
     created: int
     skipped: int
     errors: list[RowError]
+    provisioning_queued: int = 0  # employees whose external provisioning was queued
 
 
 class SkillRead(BaseModel):

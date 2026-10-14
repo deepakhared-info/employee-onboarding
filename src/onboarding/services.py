@@ -19,19 +19,29 @@ from src.onboarding.schemas import (
     RowError,
     SkillProficiency,
 )
+from src.provisioning.db import provisioning_task_manager
+from src.provisioning.processor import ProvisioningDispatcher
+from src.provisioning.worker import provisioning_worker
 
 PAGE_SIZE = 20
 REQUIRED_COLUMNS = {"email", "first_name", "last_name", "start_date"}
 
 
 class EmployeeService:
-    def __init__(self, manager: EmployeeDBManager = employee_manager):
+    def __init__(
+        self,
+        manager: EmployeeDBManager = employee_manager,
+        dispatcher: ProvisioningDispatcher = provisioning_worker,
+    ):
         self.manager = manager
+        self.dispatcher = dispatcher
 
     async def import_from_csv(self, db: AsyncSession, content: bytes) -> EmployeeImportResult:
         """
         Parse a CSV and save new employees. Invalid rows and rows whose
         email already exists (in the DB or earlier in the file) are skipped.
+        Employees and their provisioning tasks are saved in one transaction; the
+        external calls themselves run later, outside the request.
         """
         reader = CSVReader(content, required_columns=REQUIRED_COLUMNS)
 
@@ -55,9 +65,21 @@ class EmployeeService:
             valid.append(employee)
 
         if valid:
-            await self.manager.bulk_create(db, objs_in=valid)
+            try:
+                employees = await self.manager.bulk_create(db, objs_in=valid, commit=False)
+                tasks = await provisioning_task_manager.create_for_employees(
+                    db, employee_ids=[e.id for e in employees]
+                )
+                task_ids = [t.id for t in tasks]
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+            self.dispatcher.dispatch(task_ids)
 
-        return EmployeeImportResult(created=len(valid), skipped=skipped, errors=errors)
+        return EmployeeImportResult(
+            created=len(valid), skipped=skipped, errors=errors, provisioning_queued=len(valid)
+        )
 
     async def list_employees(
         self,

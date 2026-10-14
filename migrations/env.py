@@ -17,6 +17,7 @@ if config.config_file_name is not None:
 from src.core.config import settings
 from src.db.base import Base
 from src.onboarding import models  # noqa: F401  (register models on Base.metadata)
+from src.provisioning import models as provisioning_models  # noqa: F401
 
 config.set_main_option("sqlalchemy.url", settings.SQLALCHEMY_DATABASE_URI)
 target_metadata = Base.metadata

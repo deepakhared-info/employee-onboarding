@@ -37,10 +37,15 @@ class BaseDBManager(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         return db_obj
 
     async def bulk_create(
-        self, db: AsyncSession, *, objs_in: Sequence[CreateSchemaType]
+        self, db: AsyncSession, *, objs_in: Sequence[CreateSchemaType], commit: bool = True
     ) -> List[ModelType]:
+        """With commit=False the rows are only flushed (ids are populated) so the caller
+        can add related rows and commit everything atomically."""
         db_objs = [self.model(**obj_in.model_dump()) for obj_in in objs_in]  # type: ignore
         db.add_all(db_objs)
+        if not commit:
+            await db.flush()
+            return db_objs
         await db.commit()
         for db_obj in db_objs:
             await db.refresh(db_obj)
