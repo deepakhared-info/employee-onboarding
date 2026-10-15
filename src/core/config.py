@@ -5,6 +5,7 @@ class Config(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     DEBUG: bool = True
+    LOG_LEVEL: str = 'DEBUG'
     API_PREFIX: str = '/api'
     SQLALCHEMY_DATABASE_URI: str = ''
 

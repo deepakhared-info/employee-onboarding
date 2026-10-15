@@ -1,6 +1,10 @@
 from celery import Celery
+from celery.signals import setup_logging as celery_setup_logging
 
 from src.core.config import settings
+from src.core.logger import setup_logging
+
+celery_setup_logging.connect(lambda **_: setup_logging())
 
 celery_app = Celery(
     "employee-onboarding",
