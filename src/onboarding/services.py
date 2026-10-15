@@ -1,3 +1,5 @@
+from typing import Callable, Sequence
+
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,8 +22,7 @@ from src.onboarding.schemas import (
     SkillProficiency,
 )
 from src.provisioning.db import provisioning_task_manager
-from src.provisioning.processor import ProvisioningDispatcher
-from src.provisioning.worker import provisioning_worker
+from src.provisioning.tasks import dispatch_provisioning
 
 PAGE_SIZE = 20
 REQUIRED_COLUMNS = {"email", "first_name", "last_name", "start_date"}
@@ -31,7 +32,7 @@ class EmployeeService:
     def __init__(
         self,
         manager: EmployeeDBManager = employee_manager,
-        dispatcher: ProvisioningDispatcher = provisioning_worker,
+        dispatcher: Callable[[Sequence[int]], None] = dispatch_provisioning,
     ):
         self.manager = manager
         self.dispatcher = dispatcher
@@ -81,7 +82,7 @@ class EmployeeService:
                 await db.rollback()
                 raise
             if task_ids:
-                self.dispatcher.dispatch(task_ids)
+                self.dispatcher(task_ids)
 
         return EmployeeImportResult(
             created=created, skipped=skipped, errors=errors, provisioning_queued=created

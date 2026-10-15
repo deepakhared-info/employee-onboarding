@@ -16,7 +16,7 @@ from src.routes import router  # noqa: E402
 
 @pytest.fixture
 def client():
-    """App without lifespan (no provisioning worker) and with the DB session stubbed out."""
+    """App with the DB session stubbed out."""
     app = FastAPI()
     app.include_router(router, prefix=settings.API_PREFIX)
     app.dependency_overrides[get_db] = lambda: AsyncMock()

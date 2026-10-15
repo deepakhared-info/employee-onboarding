@@ -52,7 +52,7 @@ class TestImportFromCsv:
         assert (result.created, result.skipped, result.errors, result.provisioning_queued) == (2, 0, [], 2)
         assert [e.email for e in manager.insert_new.await_args.kwargs["objs_in"]] == ["a@x.com", "b@x.com"]
         db.commit.assert_awaited_once()
-        dispatcher.dispatch.assert_called_once_with([100, 101])
+        dispatcher.assert_called_once_with([100, 101])
 
     async def test_invalid_rows_are_reported_not_saved(self, service, db, manager):
         content = make_csv(["A,One,not-an-email,2026-01-01", "B,Two,b@x.com,2026-01-02"])
@@ -75,7 +75,7 @@ class TestImportFromCsv:
 
         assert result.created == 0
         manager.insert_new.assert_not_awaited()
-        dispatcher.dispatch.assert_not_called()
+        dispatcher.assert_not_called()
 
     async def test_rows_inserted_concurrently_are_skipped(self, service, db, manager, task_manager, dispatcher):
         manager.insert_new.side_effect = lambda db, objs_in: [1]  # other request won the 2nd row
@@ -85,7 +85,7 @@ class TestImportFromCsv:
 
         assert (result.created, result.skipped, result.provisioning_queued) == (1, 1, 1)
         task_manager.create_for_employees.assert_awaited_once_with(db, employee_ids=[1])
-        dispatcher.dispatch.assert_called_once_with([100])
+        dispatcher.assert_called_once_with([100])
 
     async def test_all_rows_inserted_concurrently_creates_nothing(self, service, db, manager, task_manager, dispatcher):
         manager.insert_new.side_effect = lambda db, objs_in: []
@@ -94,7 +94,7 @@ class TestImportFromCsv:
 
         assert (result.created, result.skipped) == (0, 1)
         task_manager.create_for_employees.assert_not_awaited()
-        dispatcher.dispatch.assert_not_called()
+        dispatcher.assert_not_called()
 
     async def test_missing_columns(self, service, db):
         with pytest.raises(InvalidFileError, match="Missing columns"):
@@ -108,7 +108,7 @@ class TestImportFromCsv:
 
         db.rollback.assert_awaited_once()
         db.commit.assert_not_awaited()
-        dispatcher.dispatch.assert_not_called()
+        dispatcher.assert_not_called()
 
 
 class TestListEmployees:

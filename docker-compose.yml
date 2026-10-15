@@ -9,12 +9,42 @@ services:
     #   - .env
     environment:
       SQLALCHEMY_DATABASE_URI: postgresql://postgres:postgres@db:5432/app
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
     volumes:
       - ./main.py:/app/main.py
       - ./src:/app/src
     depends_on:
       db:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      target: dev
+    command: celery -A src.celery_app worker --loglevel=info
+    environment:
+      SQLALCHEMY_DATABASE_URI: postgresql://postgres:postgres@db:5432/app
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+    volumes:
+      - ./src:/app/src
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
 
   db:
     image: postgres:16

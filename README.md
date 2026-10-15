@@ -43,19 +43,18 @@ Team leads track people and skills in scattered spreadsheets, so questions like
   transaction the import saves the employees *and* one provisioning task per service
   per employee. The slow external calls happen afterwards, outside the request, so
   an HTTP request never blocks on, or half-completes because of, a downstream system.
-- **Tasks are durable and retried.** A background worker claims due tasks atomically,
-  calls the service, and records the outcome. Transient errors are retried with
+- **Tasks are durable and retried.** Each task is a Celery job (RabbitMQ broker) that
+  calls the service and records the outcome. Transient errors are retried with
   exponential backoff and jitter. Permanent failures, or exhausted attempts, end as
   `failed` rows that are kept as a dead letter, and operators can see them via the API.
 - **No partial state without a trace.** The employee and its tasks commit together or
   not at all. Each service's state is tracked per employee, so a half-onboarded
   employee is visible and recoverable instead of silently inconsistent.
 - **Failure isolation.** A per-service circuit breaker stops hammering a failing
-  service. Its tasks wait untouched and don't burn retry attempts until it recovers.
+  service. Its tasks are rescheduled after the cooldown and don't burn retry attempts.
 - **Safe under concurrency.** The database's unique indexes arbitrate races
-  (`INSERT ... ON CONFLICT DO NOTHING`), and tasks are claimed with a single
-  `UPDATE ... RETURNING`, so duplicate or parallel requests and multiple workers don't
-  clash.
+  (`INSERT ... ON CONFLICT DO NOTHING`), and finished tasks are skipped on redelivery,
+  so duplicate or parallel requests and multiple workers don't clash.
 
 ## Design
 
@@ -67,13 +66,13 @@ POST /employees/import
  │ INSERT employees (ON CONFLICT (email) DO NOTHING)  │
  │ INSERT provisioning_task × 3 per new employee      │
  └────────────────────────────────────────────────────┘
-   │ commit → wake worker                  (response returns here)
+   │ commit → enqueue provision(task_id) × 3   (response returns here)
    ▼
- Provisioning worker (polls; woken on dispatch)
-   claim task (atomic UPDATE, lease)  →  call service (idempotency key)
+ Celery worker (RabbitMQ)
+   load task, skip if finished  →  call service (idempotency key)
      ├─ ok                → succeeded
-     ├─ transient error   → pending again, exponential backoff
-     ├─ circuit open      → released, no attempt charged
+     ├─ transient error   → self.retry, exponential backoff
+     ├─ circuit open      → self.retry after cooldown, no attempt charged
      └─ permanent / max attempts → failed (dead letter, last_error kept)
 ```
 
@@ -82,9 +81,8 @@ POST /employees/import
 | Layers | `api` (HTTP) → `services` (use cases) → `db` managers (queries) → models |
 | Services called | `hr_operations`, `it_services`, `access_provision` (simulated) |
 | Delivery | At-least-once, made safe by idempotency keys `employee-{id}:{service}` |
-| Crash safety | A task has a lease. If a worker dies, the lease expires and the task is re-claimed |
-| Stale writers | Outcomes are written only if the task is still `running` for the same attempt |
-| Swapping the runner | The worker sits behind a small `dispatch(task_ids)` interface, so it can be replaced by Celery/SQS without touching the import code (`PROVISIONING_WORKER_ENABLED=false`) |
+| Crash safety | Late acks: if a worker dies mid-task, RabbitMQ redelivers the message |
+| Attempt budget | Kept in the task row (`attempts`), so it survives redelivery and worker restarts |
 | Migrations | Alembic, applied automatically when the container starts |
 
 **API** (prefix `/api/v1`, Swagger at `/docs`)
@@ -102,8 +100,9 @@ POST /employees/import
   service permanently fails. The failure is recorded as a dead letter and shown in the
   provisioning status for follow-up. Compensating calls would need undo operations on
   the downstream systems, which the simulated services don't have.
-- The in-process worker is enough for one container. Several replicas are safe
-  (claims are atomic), but circuit-breaker state is per process.
+- If RabbitMQ is down at import time the employees and tasks are still saved, but the
+  jobs are not enqueued and stay `pending` until re-dispatched. Several workers are
+  safe, but circuit-breaker state is per worker process.
 - Import pre-checks each email with its own query, and inserts in one statement, which
   is fine for typical HR-sized files but not for very large ones (tens of thousands of rows).
 
@@ -113,9 +112,10 @@ Repository: https://github.com/deepakhared-info/employee-onboarding
 
 ```
 src/
-  app.py, routes.py        FastAPI app, lifespan (starts the worker), routing
+  app.py, routes.py        FastAPI app, routing
+  celery_app.py            Celery app (RabbitMQ broker)
   onboarding/              employees & skills: api, services, db, models, schemas
-  provisioning/            outbox task model, db claim/retry logic, processor, worker, status API
+  provisioning/            task status model, Celery task (calls, retry), status API
   external/                simulated HR / IT / access services + circuit-breaker wrapper
   core/                    settings, errors, CSV reader, retry/backoff + circuit breaker
   db/                      engine/session, base model, generic CRUD manager
@@ -150,9 +150,8 @@ Database access is mocked in unit tests.
   | Variable | Default | Meaning |
   |---|---|---|
   | `SQLALCHEMY_DATABASE_URI` | – | PostgreSQL connection string (required) |
-  | `PROVISIONING_WORKER_ENABLED` | `true` | Run the in-process worker. Set `false` if another runner processes tasks |
+  | `CELERY_BROKER_URL` | `amqp://guest:guest@localhost:5672//` | RabbitMQ connection string |
   | `PROVISIONING_MAX_ATTEMPTS` | `5` | Attempts before a task is marked failed |
-  | `PROVISIONING_LEASE_SECONDS` | `60` | Time before a running task is picked up again |
   | `PROVISIONING_BACKOFF_BASE` / `_CAP` | `2` / `300` | Retry backoff in seconds |
   | `EXTERNAL_CALL_TIMEOUT` | `10` | Per-call timeout (seconds) |
   | `CIRCUIT_FAILURE_THRESHOLD` / `_RECOVERY_TIMEOUT` | `5` / `30` | Circuit breaker tuning |
@@ -171,7 +170,7 @@ Database access is mocked in unit tests.
 docker compose up --build -d
 ```
 
-This starts PostgreSQL and the API, and applies the migrations automatically.
+This starts PostgreSQL, RabbitMQ, the Celery worker and the API, and applies the migrations automatically.
 Open the [Swagger docs](http://localhost:8080/docs).
 
 Try it:
@@ -199,4 +198,7 @@ uv sync
 export SQLALCHEMY_DATABASE_URI=postgresql://postgres:postgres@localhost:5432/app
 uv run alembic upgrade head
 uv run uvicorn main:app --reload --port 8080
+
+# in another terminal (needs RabbitMQ on localhost:5672)
+uv run celery -A src.celery_app worker --loglevel=info
 ```

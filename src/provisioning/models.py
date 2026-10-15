@@ -15,15 +15,14 @@ class ProvisioningService(str, enum.Enum):
 
 class ProvisioningStatus(str, enum.Enum):
     PENDING = "pending"
-    RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"  # attempts exhausted or permanent error; kept as a dead letter
 
 
 class ProvisioningTask(Base):
     """
-    Outbox row: one external-service call to make for an employee. Written in the same
-    transaction as the employee, then executed by a worker (at-least-once delivery).
+    Status record of one external-service call to make for an employee. Written in the same
+    transaction as the employee, then executed by a Celery task (see tasks.py).
     """
 
     __table_args__ = (
